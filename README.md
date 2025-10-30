@@ -6,6 +6,7 @@ Extension for PHPStan for better support for Craft CMS. The following features a
 
 - Configure autoload of Craft CMS for analysis
 - Stub to support different `ElementQuery`-classes
+- Dependency injection container with `Craft::$container->get()`
 
 ## Install
 
@@ -25,6 +26,6 @@ includes:
 
 ## Credits
 
-- [Studio Stomp][link-author]
+- [studio-stomp/phpstan-craftcms][[link-author](https://github.com/studio-stomp/phpstan-craftcms)]
 - [marcusgaius/phpstan](https://github.com/marcusgaius/phpstan)
 - [erickskrauch/phpstan-yii2](https://github.com/erickskrauch/phpstan-yii2)
