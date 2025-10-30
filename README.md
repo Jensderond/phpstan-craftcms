@@ -1,6 +1,6 @@
 # phpstan-craftcms
 
-[![Latest Version on Packagist][ico-version]][link-packagist]
+![Packagist Version](https://img.shields.io/packagist/v/jensderond/phpstan-craftcms)
 
 Extension for PHPStan for better support for Craft CMS. The following features are provided:
 
