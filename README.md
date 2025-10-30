@@ -26,6 +26,6 @@ includes:
 
 ## Credits
 
-- [studio-stomp/phpstan-craftcms][[link-author](https://github.com/studio-stomp/phpstan-craftcms)]
+- [studio-stomp/phpstan-craftcms](https://github.com/studio-stomp/phpstan-craftcms)
 - [marcusgaius/phpstan](https://github.com/marcusgaius/phpstan)
 - [erickskrauch/phpstan-yii2](https://github.com/erickskrauch/phpstan-yii2)
