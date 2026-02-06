@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Jensderond\PhpstanCraftcms\Reflection;
@@ -13,52 +14,55 @@ use PHPStan\PhpDocParser\Ast\Type\UnionTypeNode;
 use PHPStan\Type\Type;
 use PHPStan\Type\UnionType;
 
-abstract class UnionMethodTypeNodeResolver implements TypeNodeResolverExtension, TypeNodeResolverAwareExtension
+abstract class UnionMethodTypeNodeResolver implements TypeNodeResolverAwareExtension, TypeNodeResolverExtension
 {
-	private TypeNodeResolver $typeNodeResolver;
+    private TypeNodeResolver $typeNodeResolver;
 
-	/**
-	 * @return class-string
-	 */
-	abstract public function getQualifyingName(): string;
+    /**
+     * @return class-string
+     */
+    abstract public function getQualifyingName(): string;
 
-	public function setTypeNodeResolver(TypeNodeResolver $typeNodeResolver): void
-	{
-		$this->typeNodeResolver = $typeNodeResolver;
-	}
+    public function setTypeNodeResolver(TypeNodeResolver $typeNodeResolver): void
+    {
+        $this->typeNodeResolver = $typeNodeResolver;
+    }
 
-	/**
-	 * @param Type[] $types
-	 * @return Type[]
-	 */
-	abstract public function resolveTypes(array $types): array;
+    /**
+     * @param  array<int, Type>  $types
+     * @return array<int, Type>
+     */
+    abstract public function resolveTypes(array $types): array;
 
-	/** @return int */
-	abstract public function getNodeCount(): int;
+    abstract public function getNodeCount(): int;
 
-	public function resolve(TypeNode $typeNode, NameScope $nameScope): ?Type
-	{
-		if ($typeNode instanceof UnionTypeNode) {
-			if (count($typeNode->types) !== $this->getNodeCount()) return null;
+    public function resolve(TypeNode $typeNode, NameScope $nameScope): ?Type
+    {
+        if (! $typeNode instanceof UnionTypeNode) {
+            return null;
+        }
 
-			$nodeTypes = array_filter($typeNode->types, function(TypeNode $unionTypeNode) use ($nameScope): bool {
-				if ($unionTypeNode::class !== ArrayTypeNode::class) return false;
-				$type = $this->typeNodeResolver->resolve($unionTypeNode->type, $nameScope);
-				if (!$type->isObject()->yes()) return false;
-				if ($type->getClassName() !== $this->getQualifyingName()) return false;
+        if (count($typeNode->types) !== $this->getNodeCount()) {
+            return null;
+        }
 
-				return true;
-			});
+        $hasQualifyingType = array_filter($typeNode->types, function (TypeNode $unionTypeNode) use ($nameScope): bool {
+            if ($unionTypeNode::class !== ArrayTypeNode::class) {
+                return false;
+            }
 
-			if (empty($nodeTypes)) {
-				return null;
-			}
+            $type = $this->typeNodeResolver->resolve($unionTypeNode->type, $nameScope);
 
-			$types = $this->typeNodeResolver->resolveMultiple($typeNode->types, $nameScope);
+            return $type->isObject()->yes()
+                && $type->getClassName() === $this->getQualifyingName();
+        });
 
-			return new UnionType($this->resolveTypes($types), true);
-		}
+        if ($hasQualifyingType === []) {
+            return null;
+        }
 
-		return null;
-	}
+        $types = $this->typeNodeResolver->resolveMultiple($typeNode->types, $nameScope);
+
+        return new UnionType($this->resolveTypes($types), true);
+    }
 }

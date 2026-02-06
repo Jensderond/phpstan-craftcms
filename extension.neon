@@ -1,11 +1,17 @@
 parameters:
 	yii2:
 		config_path: %rootDir%/../../../config/app.php
+	craftActionInput:
+		templatePaths:
+			- %currentWorkingDirectory%/templates
+			- %currentWorkingDirectory%/modules
+			- %currentWorkingDirectory%/plugins
+		handleMap: []
 	reportUnmatchedIgnoredErrors: false
 	excludePaths:
 		- ../../craftcms/cms/src/test/internal/*
-		- ../../craftcms/cms/src/config/composer-classes.php?
-		- ../../craftcms/cms/src/config/mimeTypes.php
+		- ../../craftcms/cms/src/config/composer-classes.php (?)
+		- ../../craftcms/cms/src/config/mimeTypes.php (?)
 		- ../../craftcms/cms/src/views/debug/*
 	scanFiles:
 		- ../../craftcms/cms/src/Craft.php
@@ -32,6 +38,10 @@ parametersSchema:
 	yii2: structure([
 		config_path: schema(string())
 	])
+	craftActionInput: structure([
+		templatePaths: listOf(string())
+		handleMap: schema(arrayOf(string()))
+	])
 
 services:
 	-
@@ -43,3 +53,18 @@ services:
 		tags:
 			- phpstan.phpDoc.typeNodeResolverExtension
 	- Jensderond\PhpstanCraftcms\ServiceMap(%yii2.config_path%)
+	-
+		class: Jensderond\PhpstanCraftcms\Helper\ActionRouteMap
+		arguments:
+			configPath: %yii2.config_path%
+			handleMap: %craftActionInput.handleMap%
+	-
+		class: Jensderond\PhpstanCraftcms\Collector\ControllerActionCollector
+		tags:
+			- phpstan.collector
+	-
+		class: Jensderond\PhpstanCraftcms\Rule\TwigActionInputRule
+		arguments:
+			templatePaths: %craftActionInput.templatePaths%
+		tags:
+			- phpstan.rules.rule
