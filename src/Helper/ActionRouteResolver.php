@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Jensderond\PhpstanCraftcms\Helper;
 
+use ReflectionClass;
+
 final class ActionRouteResolver
 {
     /**
@@ -62,6 +64,9 @@ final class ActionRouteResolver
                     continue;
                 }
 
+                // Resolve the controller's default action (Yii2 defaults to 'index')
+                $defaultActionId = self::resolveDefaultActionId($controllerFqcn);
+
                 foreach ($methods as $methodName) {
                     $actionId = self::methodNameToActionId($methodName);
 
@@ -71,11 +76,44 @@ final class ActionRouteResolver
                         : $controllerId.'/'.$actionId;
 
                     $routes[$route] = true;
+
+                    // Also register shorthand route when action matches the controller's defaultAction
+                    // e.g. "job-quiz/result" as shorthand for "job-quiz/result/index"
+                    if ($actionId === $defaultActionId) {
+                        $shortRoute = $handle !== ''
+                            ? $handle.'/'.$controllerId
+                            : $controllerId;
+
+                        $routes[$shortRoute] = true;
+                    }
                 }
             }
         }
 
         return $routes;
+    }
+
+    /**
+     * Resolve the default action ID for a controller class.
+     *
+     * Reads the $defaultAction property from the controller (falls back to 'index',
+     * which is Yii2's default). Converts the value to a kebab-case action ID.
+     */
+    private static function resolveDefaultActionId(string $controllerFqcn): string
+    {
+        try {
+            $reflection = new ReflectionClass($controllerFqcn);
+            $property = $reflection->getProperty('defaultAction');
+            $defaultValue = $property->getDefaultValue();
+
+            if (is_string($defaultValue) && $defaultValue !== '') {
+                return self::camelToId($defaultValue);
+            }
+        } catch (\ReflectionException) {
+            // Class not loadable or property doesn't exist — fall back to Yii2 default
+        }
+
+        return 'index';
     }
 
     /**
