@@ -33,6 +33,7 @@ parameters:
 			- convertExceptionToError
 	ignoreErrors:
 		- '#^Parameter \#3 \$with of method craft\\services\\Elements\:\:eagerLoadElements\(\) expects array\<int, craft\\elements\\db\\EagerLoadPlan\|string\>\|string, array\<int, list\<array\<string, list\<string\>\>\|string\>\|string\> given\.$#'
+		- '#has parameter \$action with generic class yii\\base\\Action but does not specify its types: T$#'
 
 parametersSchema:
 	yii2: structure([
