@@ -189,13 +189,15 @@ final class ActionRouteMap
         foreach ($files as $file) {
             $className = $namespace.'\\'.basename($file, '.php');
 
-            if (! class_exists($className)) {
-                continue;
-            }
-
             try {
+                if (! class_exists($className)) {
+                    continue;
+                }
+
                 $reflection = new ReflectionClass($className);
-            } catch (\ReflectionException) {
+            } catch (\Throwable) {
+                // A malformed third-party controller (parse error, missing dependency, etc.)
+                // must not abort the whole PHPStan run.
                 continue;
             }
 
