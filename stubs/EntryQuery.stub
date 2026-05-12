@@ -2,4 +2,14 @@
 
 namespace craft\elements\db;
 
-class EntryQuery {}
+use craft\elements\Entry;
+use craft\elements\NestedElementQueryInterface;
+
+/**
+ * @method Entry|null one($db = null)
+ * @method Entry|null nth(int $n, $db = null)
+ * @method list<Entry> all($db = null)
+ */
+class EntryQuery extends ElementQuery implements NestedElementQueryInterface
+{
+}
