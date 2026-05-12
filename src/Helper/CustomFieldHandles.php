@@ -10,7 +10,7 @@ class CustomFieldHandles
     private ?array $handles = null;
 
     public function __construct(
-        private readonly string $fieldsPath,
+        private readonly string $projectConfigPath,
     ) {}
 
     /**
@@ -24,12 +24,29 @@ class CustomFieldHandles
 
         $handles = [];
 
-        if (is_dir($this->fieldsPath)) {
-            foreach (glob(rtrim($this->fieldsPath, '/').'/*.yaml') ?: [] as $file) {
-                $handle = $this->extractHandle($file);
-                if ($handle !== null) {
-                    $handles[$handle] = true;
-                }
+        if (! is_dir($this->projectConfigPath)) {
+            return $this->handles = $handles;
+        }
+
+        $root = rtrim($this->projectConfigPath, '/');
+
+        foreach (glob($root.'/fields/*.yaml') ?: [] as $file) {
+            $handle = $this->extractTopLevelHandle($file);
+            if ($handle !== null) {
+                $handles[$handle] = true;
+            }
+        }
+
+        foreach (
+            array_merge(
+                glob($root.'/entryTypes/*.yaml') ?: [],
+                glob($root.'/sections/*.yaml') ?: [],
+                glob($root.'/volumes/*.yaml') ?: [],
+                glob($root.'/users.yaml') ? [$root.'/users.yaml'] : [],
+            ) as $file
+        ) {
+            foreach ($this->extractFieldLayoutHandles($file) as $handle) {
+                $handles[$handle] = true;
             }
         }
 
@@ -46,7 +63,7 @@ class CustomFieldHandles
         return $this->all() !== [];
     }
 
-    private function extractHandle(string $file): ?string
+    private function extractTopLevelHandle(string $file): ?string
     {
         $contents = @file_get_contents($file);
         if ($contents === false) {
@@ -58,5 +75,34 @@ class CustomFieldHandles
         }
 
         return null;
+    }
+
+    /**
+     * Pulls handle overrides defined inside field layout entries. Each entry has a
+     * `fieldUid:` reference to a global field followed by a `handle:` line giving
+     * it a layout-local handle. We deliberately ignore top-level `handle:` keys
+     * (entry type / section / volume handles) — only field handles are of interest.
+     *
+     * @return list<string>
+     */
+    private function extractFieldLayoutHandles(string $file): array
+    {
+        $contents = @file_get_contents($file);
+        if ($contents === false) {
+            return [];
+        }
+
+        $handles = [];
+
+        if (preg_match_all('/^\s+fieldUid:[^\n]*\n\s+handle:\s*(\S+)\s*$/m', $contents, $matches) > 0) {
+            foreach ($matches[1] as $value) {
+                $value = trim($value, "\"'");
+                if ($value !== '' && $value !== 'null' && $value !== '~') {
+                    $handles[] = $value;
+                }
+            }
+        }
+
+        return $handles;
     }
 }

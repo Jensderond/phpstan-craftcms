@@ -8,7 +8,7 @@ parameters:
 			- %currentWorkingDirectory%/plugins
 		handleMap: []
 	craftcms:
-		projectConfigFieldsPath: %currentWorkingDirectory%/config/project/fields
+		projectConfigPath: %currentWorkingDirectory%/config/project
 	reportUnmatchedIgnoredErrors: false
 	excludePaths:
 		- ../../craftcms/cms/src/test/internal/*
@@ -46,7 +46,7 @@ parametersSchema:
 		handleMap: schema(arrayOf(string()))
 	])
 	craftcms: structure([
-		projectConfigFieldsPath: schema(string())
+		projectConfigPath: schema(string())
 	])
 
 services:
@@ -77,7 +77,7 @@ services:
 	-
 		class: Jensderond\PhpstanCraftcms\Helper\CustomFieldHandles
 		arguments:
-			fieldsPath: %craftcms.projectConfigFieldsPath%
+			projectConfigPath: %craftcms.projectConfigPath%
 	-
 		class: Jensderond\PhpstanCraftcms\Reflection\CustomFieldPropertiesExtension
 		tags:
