@@ -7,6 +7,8 @@ parameters:
 			- %currentWorkingDirectory%/modules
 			- %currentWorkingDirectory%/plugins
 		handleMap: []
+	craftcms:
+		projectConfigFieldsPath: %currentWorkingDirectory%/config/project/fields
 	reportUnmatchedIgnoredErrors: false
 	excludePaths:
 		- ../../craftcms/cms/src/test/internal/*
@@ -43,6 +45,9 @@ parametersSchema:
 		templatePaths: listOf(string())
 		handleMap: schema(arrayOf(string()))
 	])
+	craftcms: structure([
+		projectConfigFieldsPath: schema(string())
+	])
 
 services:
 	-
@@ -69,3 +74,11 @@ services:
 			templatePaths: %craftActionInput.templatePaths%
 		tags:
 			- phpstan.rules.rule
+	-
+		class: Jensderond\PhpstanCraftcms\Helper\CustomFieldHandles
+		arguments:
+			fieldsPath: %craftcms.projectConfigFieldsPath%
+	-
+		class: Jensderond\PhpstanCraftcms\Reflection\CustomFieldPropertiesExtension
+		tags:
+			- phpstan.broker.propertiesClassReflectionExtension
