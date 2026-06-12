@@ -82,3 +82,7 @@ services:
 		class: Jensderond\PhpstanCraftcms\Reflection\CustomFieldPropertiesExtension
 		tags:
 			- phpstan.broker.propertiesClassReflectionExtension
+	-
+		class: Jensderond\PhpstanCraftcms\Reflection\CustomFieldQueryMethodsExtension
+		tags:
+			- phpstan.broker.methodsClassReflectionExtension
