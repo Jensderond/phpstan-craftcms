@@ -244,10 +244,16 @@ final class TwigPerformanceAnalyzer
     }
 
     /**
-     * Fires once per query (on its terminal fetch method) when that query is
-     * built and executed inside a loop.
+     * Fires once per query (on the chain's outermost node) when that query is
+     * built and executed inside a loop. The terminal fetch method
+     * (all/one/count/exists/nth/ids) may sit anywhere in the chain, not just at
+     * the outermost position — e.g. `craft.entries.section('n').one().title`
+     * reads a property off the fetch, so the outermost node is `.title`, not
+     * `.one()`. We therefore scan the whole chain for a terminal fetch method
+     * rather than requiring $node itself to be one.
      *
-     * $node is the terminal (outermost) GetAttr of its chain — see walk().
+     * $node is the terminal (outermost) GetAttr of its chain — see walk() —
+     * so this still reports exactly once per chain.
      */
     private function checkQueryInLoop(GetAttrExpression $node): void
     {
@@ -255,12 +261,9 @@ final class TwigPerformanceAnalyzer
             return;
         }
 
-        if (! TwigNodeHelper::isMethodCall($node)) {
-            return;
-        }
-
-        $terminal = TwigNodeHelper::attrName($node);
-        if (! in_array($terminal, ['all', 'one', 'count', 'exists', 'nth', 'ids'], true)) {
+        $methods = TwigNodeHelper::methodsInChain($node);
+        $terminals = array_intersect_key($methods, array_flip(['all', 'one', 'count', 'exists', 'nth', 'ids']));
+        if ($terminals === []) {
             return;
         }
 

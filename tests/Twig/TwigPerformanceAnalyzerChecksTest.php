@@ -122,4 +122,34 @@ final class TwigPerformanceAnalyzerChecksTest extends TestCase
             'unboundedAll' => false,
         ]));
     }
+
+    public function test_query_in_loop_fires_on_property_off_fetch(): void
+    {
+        $code = <<<'TWIG'
+        {% for x in xs %}{{ craft.entries.section("n").one().title }}{% endfor %}
+        TWIG;
+
+        self::assertContains('craftcms.twigQueryInLoop', $this->ids($code));
+    }
+
+    public function test_query_in_loop_fires_exactly_once_on_property_off_fetch(): void
+    {
+        $code = <<<'TWIG'
+        {% for x in xs %}{{ craft.entries.section("n").one().title }}{% endfor %}
+        TWIG;
+
+        $ids = $this->ids($code);
+        $count = count(array_filter($ids, static fn (string $id): bool => $id === 'craftcms.twigQueryInLoop'));
+
+        self::assertSame(1, $count);
+    }
+
+    public function test_query_in_loop_not_fired_on_relation_chain(): void
+    {
+        $code = <<<'TWIG'
+        {% for entry in entries %}{{ entry.relatedEntries.all() }}{% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigQueryInLoop', $this->ids($code));
+    }
 }
