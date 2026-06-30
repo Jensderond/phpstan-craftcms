@@ -9,6 +9,7 @@ Extension for PHPStan for better support for Craft CMS. The following features a
 - Dependency injection container support for `Craft::$container->get()`
 - Recognises custom field handles as properties on `Element` and `ElementQuery`, including handle overrides from entry-type field layouts (read from your project config)
 - Validates the `action` value of Twig `actionInput()` calls against discovered controller routes (including shorthand routes for controller default actions)
+- Detects Twig N+1 query patterns and related performance smells (relational access in loops, queries built in loops, `|length` on queries, unbounded `.all()`), with eager-load (`.with([...])`) and Craft 5 `.eagerly()` suppression
 
 ## Install
 
@@ -42,12 +43,40 @@ parameters:
             - %currentWorkingDirectory%/modules
             - %currentWorkingDirectory%/plugins
         handleMap: []
+    craftTwigPerformance:
+        enabled: true
+        templatePaths: %craftActionInput.templatePaths%
+        checks:
+            nPlusOne: true
+            nestedRelationAll: true
+            queryInLoop: true
+            lengthOnQuery: true
+            unboundedAll: false
 ```
 
 - `yii2.config_path` — path to your Yii/Craft application config used to build the service and route maps.
 - `craftcms.projectConfigPath` — path to the Craft project config directory; used to collect custom field handles and entry-type handle overrides.
 - `craftActionInput.templatePaths` — directories scanned for Twig `actionInput()` calls.
 - `craftActionInput.handleMap` — optional map of additional handle aliases used when resolving `actionInput()` values to controllers.
+
+### Twig performance checks
+
+`craftTwigPerformance.checks` toggles each check; `unboundedAll` is off by default
+(it is often intentional). Suppress a check project-wide via `ignoreErrors` using
+its identifier:
+
+- `craftcms.twigNPlusOne`
+- `craftcms.twigNestedRelationAll`
+- `craftcms.twigQueryInLoop`
+- `craftcms.twigLengthOnQuery`
+- `craftcms.twigUnboundedAll`
+
+Limitations: analysis is per-template — it does not follow loop variables across
+`{% include %}`, macros, or block boundaries. Loop-source eager-loading is detected
+inline or one `{% set %}` back. `.with(...)` is honored only for literal string
+arrays; dynamic arguments suppress the finding. `|length`-on-query detection is a
+best-effort static heuristic. Eager-load suppression recognizes both
+`.with([...])` and Craft 5's `.eagerly()`.
 
 ## Credits
 
