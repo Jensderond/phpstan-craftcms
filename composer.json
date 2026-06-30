@@ -7,12 +7,18 @@
 	},
 	"require-dev": {
 		"craftcms/cms": "~5",
-		"laravel/pint": "^1.25"
+		"laravel/pint": "^1.25",
+		"phpunit/phpunit": "^11.5"
 	},
 	"license": "MIT",
 	"autoload": {
 		"psr-4": {
 			"Jensderond\\PhpstanCraftcms\\": "src/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"Jensderond\\PhpstanCraftcms\\Tests\\": "tests/"
 		}
 	},
 	"authors": [
@@ -22,7 +28,8 @@
 		}
 	],
 	"scripts": {
-		"lint": "pint"
+		"lint": "pint",
+		"test": "phpunit"
 	},
 	"config": {
 		"allow-plugins": {
