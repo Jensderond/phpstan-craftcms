@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jensderond\PhpstanCraftcms\Twig;
 
 use Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry;
+use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\GetAttrExpression;
 use Twig\Node\ForNode;
 use Twig\Node\ModuleNode;
@@ -82,9 +83,16 @@ final class TwigPerformanceAnalyzer
 
         if ($node instanceof GetAttrExpression) {
             $this->checkChain($node);
+            $this->checkNestedRelationAll($node);
+            $this->checkQueryInLoop($node);
+            $this->checkUnboundedAll($node);
             $this->walkChainSideBranches($node);
 
             return;
+        }
+
+        if ($node instanceof FilterExpression) {
+            $this->checkLengthOnQuery($node);
         }
 
         foreach ($node as $child) {
@@ -166,6 +174,172 @@ final class TwigPerformanceAnalyzer
             sprintf('Relation "%s" is accessed inside a loop without eager-loading, causing an N+1 query.', $attr),
             sprintf('Eager-load it on the query with .with([\'%s\']) or use %s.%s.eagerly() in the loop.', $attr, $frame['var'], $attr),
         );
+    }
+
+    /**
+     * Pattern: `<loopVar>.<relation>.all()` inside a loop — a nested relation
+     * fetched with .all() on each iteration, causing an N+1 query, unless
+     * `.eagerly()` is also present in the chain (it sits below the terminal
+     * `.all()`, e.g. `entry.rel.eagerly().all()`, so methodsInChain($node) sees it).
+     *
+     * $node is the terminal (outermost) GetAttr of its chain — see walk().
+     */
+    private function checkNestedRelationAll(GetAttrExpression $node): void
+    {
+        if (! $this->enabled('nestedRelationAll') || $this->loopStack === []) {
+            return;
+        }
+
+        if (! TwigNodeHelper::isMethodCall($node) || TwigNodeHelper::attrName($node) !== 'all') {
+            return;
+        }
+
+        $methods = TwigNodeHelper::methodsInChain($node);
+        if (isset($methods['eagerly'])) {
+            return;
+        }
+
+        $object = $node->hasNode('node') ? $node->getNode('node') : null;
+        if (! $object instanceof GetAttrExpression) {
+            return;
+        }
+
+        // Walk down through any method calls to the relation access itself.
+        $relationNode = $object;
+        while ($relationNode instanceof GetAttrExpression && TwigNodeHelper::isMethodCall($relationNode)) {
+            $relationNode = $relationNode->hasNode('node') ? $relationNode->getNode('node') : null;
+        }
+        if (! $relationNode instanceof GetAttrExpression || ! $relationNode->hasNode('node')) {
+            return;
+        }
+
+        $objectName = TwigNodeHelper::nameOf($relationNode->getNode('node'));
+        $attr = TwigNodeHelper::attrName($relationNode);
+        if ($objectName === null || $attr === null) {
+            return;
+        }
+        if (! $this->isActiveLoopVar($objectName) || ! $this->relations->isRelation($attr)) {
+            return;
+        }
+
+        $this->findings[] = new Finding(
+            'craftcms.twigNestedRelationAll',
+            $node->getTemplateLine(),
+            sprintf('Nested relation "%s" is fetched with .all() inside a loop, causing an N+1 query.', $attr),
+            sprintf('Use %s.%s.eagerly().all() or eager-load "%s" on the parent query.', $objectName, $attr, $attr),
+        );
+    }
+
+    /**
+     * Fires once per query (on its terminal fetch method) when that query is
+     * built and executed inside a loop.
+     *
+     * $node is the terminal (outermost) GetAttr of its chain — see walk().
+     */
+    private function checkQueryInLoop(GetAttrExpression $node): void
+    {
+        if (! $this->enabled('queryInLoop') || $this->loopStack === []) {
+            return;
+        }
+
+        if (! TwigNodeHelper::isMethodCall($node)) {
+            return;
+        }
+
+        $terminal = TwigNodeHelper::attrName($node);
+        if (! in_array($terminal, ['all', 'one', 'count', 'exists', 'nth', 'ids'], true)) {
+            return;
+        }
+
+        if (! TwigNodeHelper::isQueryRooted($node)) {
+            return;
+        }
+
+        $this->findings[] = new Finding(
+            'craftcms.twigQueryInLoop',
+            $node->getTemplateLine(),
+            'An element query is executed inside a loop, running one query per iteration.',
+            'Move the query outside the loop and eager-load, or collect IDs and query once.',
+        );
+    }
+
+    /**
+     * Unbounded `.all()` on an element query outside any loop (in-loop queries
+     * are checkQueryInLoop's job) with no `.limit()` anywhere in the chain.
+     *
+     * $node is the terminal (outermost) GetAttr of its chain — see walk().
+     */
+    private function checkUnboundedAll(GetAttrExpression $node): void
+    {
+        if (! $this->enabled('unboundedAll') || $this->loopStack !== []) {
+            return;
+        }
+
+        if (! TwigNodeHelper::isMethodCall($node) || TwigNodeHelper::attrName($node) !== 'all') {
+            return;
+        }
+
+        if (! TwigNodeHelper::isQueryRooted($node)) {
+            return;
+        }
+
+        $methods = TwigNodeHelper::methodsInChain($node);
+        if (isset($methods['limit'])) {
+            return;
+        }
+
+        $this->findings[] = new Finding(
+            'craftcms.twigUnboundedAll',
+            $node->getTemplateLine(),
+            'Unbounded .all() on an element query may load a large result set into memory.',
+            'Add .limit(n) if you do not need every element.',
+        );
+    }
+
+    /**
+     * `|length` applied directly to an element query forces it to fetch every
+     * row just to count them; `.count()` is the cheaper equivalent. Does not
+     * return early: the operand's own GetAttr chain still needs to be walked
+     * by the caller.
+     */
+    private function checkLengthOnQuery(FilterExpression $node): void
+    {
+        if (! $this->enabled('lengthOnQuery')) {
+            return;
+        }
+
+        if (TwigNodeHelper::filterName($node) !== 'length') {
+            return;
+        }
+
+        $operand = $node->hasNode('node') ? $node->getNode('node') : null;
+        if (! $operand instanceof Node || ! TwigNodeHelper::isQueryRooted($operand)) {
+            return;
+        }
+
+        // If .all()/.ids() already executed the query, |length is on an array — fine.
+        $methods = TwigNodeHelper::methodsInChain($operand);
+        if (isset($methods['all']) || isset($methods['ids'])) {
+            return;
+        }
+
+        $this->findings[] = new Finding(
+            'craftcms.twigLengthOnQuery',
+            $node->getTemplateLine(),
+            'Using |length on an element query fetches every element just to count them.',
+            'Use .count() instead of |length.',
+        );
+    }
+
+    private function isActiveLoopVar(string $name): bool
+    {
+        foreach ($this->loopStack as $frame) {
+            if ($frame['var'] === $name) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

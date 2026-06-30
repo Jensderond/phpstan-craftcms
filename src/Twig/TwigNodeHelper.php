@@ -6,6 +6,7 @@ namespace Jensderond\PhpstanCraftcms\Twig;
 
 use Twig\Node\Expression\ArrayExpression;
 use Twig\Node\Expression\ConstantExpression;
+use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\GetAttrExpression;
 use Twig\Node\Node;
 
@@ -151,6 +152,92 @@ final class TwigNodeHelper
 
         foreach ($arguments as $arg) {
             return $arg;
+        }
+
+        return null;
+    }
+
+    /**
+     * Root variable name of a GetAttr/method chain, e.g. `craft` in
+     * `craft.entries.all()`.
+     */
+    public static function rootName(Node $node): ?string
+    {
+        $current = $node;
+        while ($current instanceof GetAttrExpression && $current->hasNode('node')) {
+            $current = $current->getNode('node');
+        }
+
+        return self::nameOf($current);
+    }
+
+    /**
+     * Heuristic: the chain looks like a Craft element query (`craft.entries`,
+     * `craft.assets`, ... or a `.find()`/`.relatedTo()` builder).
+     */
+    public static function isQueryRooted(Node $node): bool
+    {
+        if (self::rootName($node) === 'craft') {
+            return self::chainHasAnyAttr($node, ['entries', 'assets', 'users', 'categories', 'tags', 'addresses']);
+        }
+
+        $methods = self::methodsInChain($node);
+
+        return isset($methods['find']) || isset($methods['relatedTo']);
+    }
+
+    /**
+     * @param  list<string>  $names
+     */
+    public static function chainHasAnyAttr(Node $node, array $names): bool
+    {
+        foreach ($names as $name) {
+            if (self::chainHasAttr($node, $name)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function chainHasAttr(Node $node, string $name): bool
+    {
+        $current = $node;
+        while ($current instanceof GetAttrExpression) {
+            if (self::attrName($current) === $name) {
+                return true;
+            }
+            $current = $current->hasNode('node') ? $current->getNode('node') : null;
+            if (! $current instanceof Node) {
+                break;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The filter name of a FilterExpression (e.g. `length` in `foo|length`).
+     * Verified against installed Twig 3.15: the `name` attribute is always set
+     * by the FilterExpression constructor regardless of how it was built, and
+     * the `filter` child node (when present) is a ConstantExpression carrying
+     * the same value.
+     */
+    public static function filterName(FilterExpression $node): ?string
+    {
+        if ($node->hasAttribute('name')) {
+            $name = $node->getAttribute('name');
+
+            return is_string($name) ? $name : null;
+        }
+
+        if ($node->hasNode('filter')) {
+            $filter = $node->getNode('filter');
+            if ($filter instanceof ConstantExpression) {
+                $value = $filter->getAttribute('value');
+
+                return is_string($value) ? $value : null;
+            }
         }
 
         return null;
