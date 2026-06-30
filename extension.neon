@@ -9,6 +9,15 @@ parameters:
 		handleMap: []
 	craftcms:
 		projectConfigPath: %currentWorkingDirectory%/config/project
+	craftTwigPerformance:
+		enabled: true
+		templatePaths: %craftActionInput.templatePaths%
+		checks:
+			nPlusOne: true
+			nestedRelationAll: true
+			queryInLoop: true
+			lengthOnQuery: true
+			unboundedAll: false
 	reportUnmatchedIgnoredErrors: false
 	excludePaths:
 		- ../../craftcms/cms/src/test/internal/*
@@ -48,6 +57,17 @@ parametersSchema:
 	craftcms: structure([
 		projectConfigPath: schema(string())
 	])
+	craftTwigPerformance: structure([
+		enabled: schema(bool())
+		templatePaths: listOf(string())
+		checks: structure([
+			nPlusOne: schema(bool())
+			nestedRelationAll: schema(bool())
+			queryInLoop: schema(bool())
+			lengthOnQuery: schema(bool())
+			unboundedAll: schema(bool())
+		])
+	])
 
 services:
 	-
@@ -86,3 +106,19 @@ services:
 		class: Jensderond\PhpstanCraftcms\Reflection\CustomFieldQueryMethodsExtension
 		tags:
 			- phpstan.broker.methodsClassReflectionExtension
+	- Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser
+	- Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry(%craftcms.projectConfigPath%)
+	-
+		class: Jensderond\PhpstanCraftcms\Twig\TwigPerformanceAnalyzer
+		arguments:
+			relations: @Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry
+			enabledChecks: %craftTwigPerformance.checks%
+	-
+		class: Jensderond\PhpstanCraftcms\Rule\TwigPerformanceRule
+		arguments:
+			parser: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser
+			analyzer: @Jensderond\PhpstanCraftcms\Twig\TwigPerformanceAnalyzer
+			templatePaths: %craftTwigPerformance.templatePaths%
+			enabled: %craftTwigPerformance.enabled%
+		tags:
+			- phpstan.rules.rule

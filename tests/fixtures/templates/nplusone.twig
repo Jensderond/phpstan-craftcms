@@ -1,0 +1,3 @@
+{% for entry in craft.entries.section('news').all() %}
+  {{ entry.author.fullName }}
+{% endfor %}
