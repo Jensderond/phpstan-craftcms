@@ -72,8 +72,21 @@ final class TwigPerformanceAnalyzer
         }
 
         if ($node instanceof ForNode) {
+            // Walk the loop's source expression in the OUTER context first: a
+            // query used as the loop's own source runs once (before iteration
+            // begins), so it must not be visible to checks like
+            // checkQueryInLoop() as "inside this loop". If that same source
+            // expression is itself nested inside an enclosing loop, the outer
+            // frame is still on the stack at this point, so it is correctly
+            // flagged as running per outer iteration.
+            $seq = $node->getNode('seq');
+            $this->walk($seq);
+
             $this->enterLoop($node);
             foreach ($node as $child) {
+                if ($child === $seq) {
+                    continue;
+                }
                 $this->walk($child);
             }
             array_pop($this->loopStack);

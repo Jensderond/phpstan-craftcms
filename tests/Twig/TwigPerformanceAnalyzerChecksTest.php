@@ -96,4 +96,30 @@ final class TwigPerformanceAnalyzerChecksTest extends TestCase
         $code = '{% set entries = craft.entries.limit(10).all() %}';
         self::assertNotContains('craftcms.twigUnboundedAll', $this->ids($code));
     }
+
+    public function test_top_level_loop_source_query_not_flagged_as_query_in_loop(): void
+    {
+        $code = <<<'TWIG'
+        {% for entry in craft.entries.section("news").all() %}{{ entry.title }}{% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigQueryInLoop', $this->ids($code, [
+            'queryInLoop' => true,
+            'unboundedAll' => false,
+        ]));
+    }
+
+    public function test_nested_loop_source_query_flagged_as_query_in_loop(): void
+    {
+        $code = <<<'TWIG'
+        {% for entry in entries %}
+          {% for asset in craft.assets.volume("x").all() %}{{ asset.title }}{% endfor %}
+        {% endfor %}
+        TWIG;
+
+        self::assertContains('craftcms.twigQueryInLoop', $this->ids($code, [
+            'queryInLoop' => true,
+            'unboundedAll' => false,
+        ]));
+    }
 }
