@@ -51,4 +51,24 @@ final class TwigTemplateParserTest extends TestCase
         // Unterminated block — unrecoverable even for a permissive parser.
         self::assertNull($this->parser->parseSource('{% for x in y %}'));
     }
+
+    public function test_parses_file_from_disk(): void
+    {
+        // Create a temporary file with Twig content.
+        $tempPath = sys_get_temp_dir().'/'.uniqid('twig_test_', true).'.twig';
+        file_put_contents($tempPath, '{{ entry.title }}');
+
+        try {
+            $module = $this->parser->parseFile($tempPath);
+            self::assertInstanceOf(ModuleNode::class, $module);
+        } finally {
+            unlink($tempPath);
+        }
+    }
+
+    public function test_returns_null_for_missing_file(): void
+    {
+        $module = $this->parser->parseFile('/does/not/exist/nope.twig');
+        self::assertNull($module);
+    }
 }
