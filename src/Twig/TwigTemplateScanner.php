@@ -14,9 +14,10 @@ use SplFileInfo;
  * Single source of truth for walking the configured template directories.
  *
  * Both the action-input scanning and the performance scanning go through this
- * service so the template tree is traversed once and each `.twig` file is
- * opened/parsed at most once (lazily, via {@see ScannedTemplate}). It is also
- * used by {@see TwigTemplateCacheMetaExtension} to hash the discovered files so
+ * service so every consumer sees the same merged directory configuration, and
+ * each consumer reads/parses a template at most once and only on demand
+ * (lazily, via {@see ScannedTemplate}). It is also used by
+ * {@see TwigTemplateCacheMetaExtension} to hash the discovered files so
  * PHPStan's result cache is invalidated when any template changes.
  *
  * @phpstan-type ScanEntry ScannedTemplate

@@ -19,6 +19,10 @@ Via Composer
 $ composer require --dev jensderond/phpstan-craftcms
 ```
 
+The Twig checks require `twig/twig` ^3.27. Craft pins Twig to a specific minor
+(e.g. Craft 5.10 uses `~3.27.0`), so projects on an older Craft 5.x release that
+locks Twig below 3.27 need to update Craft before installing this version.
+
 ## Usage
 
 Add `phpstan-craftcms` to the project `phpstan.neon` / `phpstan.neon.dist`:
@@ -91,21 +95,13 @@ flagged.
 #### Result cache and template changes
 
 The Twig checks scan the template tree directly, outside PHPStan's per-file
-analysis. PHPStan's result cache is keyed on the analysed **PHP** files (and the
-config), so it is **not** aware of your `.twig` files. When you change only a
-template, a warm result cache can serve stale Twig findings — or none at all —
-because PHPStan may short-circuit before the checks re-run.
-
-To get reliable Twig results:
-
-- **In CI**, run against a cold cache (CI containers start without one), or add
-  `phpstan clear-result-cache` before `phpstan analyse`.
-- **Locally**, run `vendor/bin/phpstan clear-result-cache` after editing
-  templates (or pass a fresh `--memory-limit`/config that invalidates the cache)
-  before trusting the Twig findings.
-
-This does not affect the PHP-level features above, which participate in the
-result cache normally.
+analysis. PHPStan's result cache is normally keyed on the analysed **PHP**
+files (and the config) only, so this extension registers a result-cache meta
+extension that folds a hash of every discovered template's path and contents
+into the cache metadata. Editing, adding, or removing a `.twig` file changes
+that hash, which invalidates the result cache and triggers a full re-analysis —
+no manual `clear-result-cache` needed. Template changes are picked up by a
+plain `phpstan analyse`, locally and in CI, just like PHP changes.
 
 ## Credits
 
