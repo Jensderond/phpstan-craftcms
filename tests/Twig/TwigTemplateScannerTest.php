@@ -14,9 +14,9 @@ final class TwigTemplateScannerTest extends TestCase
 {
     private const FIXTURES = __DIR__.'/../fixtures/templates';
 
-    private function scanner(array $actionInputPaths, array $performancePaths = []): TwigTemplateScanner
+    private function scanner(array $actionInputPaths, array $performancePaths = [], array $excludeDirectories = []): TwigTemplateScanner
     {
-        return new TwigTemplateScanner(new TwigTemplateParser, $actionInputPaths, $performancePaths);
+        return new TwigTemplateScanner(new TwigTemplateParser, $actionInputPaths, $performancePaths, $excludeDirectories);
     }
 
     public function test_discovers_all_twig_files(): void
@@ -26,6 +26,21 @@ final class TwigTemplateScannerTest extends TestCase
         $basenames = array_map('basename', $files);
         self::assertContains('clean.twig', $basenames);
         self::assertContains('nplusone.twig', $basenames);
+    }
+
+    public function test_prunes_excluded_directories(): void
+    {
+        $basenames = array_map('basename', $this->scanner([self::FIXTURES], [], ['vendor'])->templateFiles());
+
+        self::assertNotContains('bundled.twig', $basenames);
+        self::assertContains('clean.twig', $basenames);
+    }
+
+    public function test_excluded_directories_are_scanned_when_not_configured(): void
+    {
+        $basenames = array_map('basename', $this->scanner([self::FIXTURES])->templateFiles());
+
+        self::assertContains('bundled.twig', $basenames);
     }
 
     public function test_returns_stable_sorted_order(): void

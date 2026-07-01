@@ -43,6 +43,10 @@ parameters:
             - %currentWorkingDirectory%/modules
             - %currentWorkingDirectory%/plugins
         handleMap: []
+    craftTemplateScan:
+        excludeDirectories:
+            - vendor
+            - node_modules
     craftTwigPerformance:
         enabled: true
         templatePaths: %craftActionInput.templatePaths%
@@ -58,6 +62,7 @@ parameters:
 - `craftcms.projectConfigPath` — path to the Craft project config directory; used to collect custom field handles and entry-type handle overrides.
 - `craftActionInput.templatePaths` — directories scanned for Twig `actionInput()` calls.
 - `craftActionInput.handleMap` — optional map of additional handle aliases used when resolving `actionInput()` values to controllers.
+- `craftTemplateScan.excludeDirectories` — directory **names** pruned from the template walk (shared by the action-input and performance scans). Defaults to `vendor` and `node_modules`, so third-party templates a package bundles (Craft's own control-panel templates, other plugins' example/asset templates) are not analysed when a scanned path contains them. Add more names (e.g. `tests`) to skip further trees.
 
 ### Twig performance checks
 
@@ -76,7 +81,12 @@ Limitations: analysis is per-template — it does not follow loop variables acro
 inline or one `{% set %}` back. `.with(...)` is honored only for literal string
 arrays; dynamic arguments suppress the finding. `|length`-on-query detection is a
 best-effort static heuristic. Eager-load suppression recognizes both
-`.with([...])` and Craft 5's `.eagerly()`.
+`.with([...])` and Craft 5's `.eagerly()`. Relation checks
+(`twigNPlusOne`/`twigNestedRelationAll`) fire only for loops that iterate element
+query results: a loop over a static array/hash literal — directly, via `{% set %}`,
+or through nested loops — yields plain values, so an attribute that happens to
+share a relation field's handle (e.g. `font.file` over a hash literal) is not
+flagged.
 
 #### Result cache and template changes
 

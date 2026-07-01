@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jensderond\PhpstanCraftcms\Twig;
 
 use Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry;
+use Twig\Node\Expression\ArrayExpression;
 use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\GetAttrExpression;
 use Twig\Node\ForNode;
@@ -24,9 +25,12 @@ final class TwigPerformanceAnalyzer
     /**
      * Stack of active loops. Each frame: loop value-variable name + the relations
      * known to be eager-loaded on the loop source. eagerLoaded === null means a
-     * dynamic with(...) was present → suppress N+1 for this loop.
+     * dynamic with(...) was present → suppress N+1 for this loop. nonElement is
+     * true when the loop iterates a plain data structure (an array/hash literal,
+     * directly or via {% set %}/nesting) rather than element query results — such
+     * a loop variable can never trigger a relation N+1, so those checks skip it.
      *
-     * @var list<array{var: string, eagerLoaded: array<string, true>|null}>
+     * @var list<array{var: string, eagerLoaded: array<string, true>|null, nonElement: bool}>
      */
     private array $loopStack = [];
 
@@ -37,6 +41,17 @@ final class TwigPerformanceAnalyzer
      * @var array<string, Node>
      */
     private array $assignments = [];
+
+    /**
+     * Variable names currently bound to a plain (non-element) value: assigned an
+     * array/hash literal via {% set %}, or the value variable of a loop whose
+     * source is itself plain. Used to propagate "this is not a Craft element"
+     * through {% set %} and nested loops (e.g. the fonts hash in
+     * `{% for family, fonts in fonts %}{% for font in fonts %}`).
+     *
+     * @var array<string, true>
+     */
+    private array $plainVars = [];
 
     /**
      * @param  array<string, bool>  $enabledChecks
@@ -54,6 +69,7 @@ final class TwigPerformanceAnalyzer
         $this->findings = [];
         $this->loopStack = [];
         $this->assignments = [];
+        $this->plainVars = [];
 
         $this->walk($module);
 
@@ -82,14 +98,33 @@ final class TwigPerformanceAnalyzer
             $seq = $node->getNode('seq');
             $this->walk($seq);
 
-            $this->enterLoop($node);
+            $valueVar = $this->enterLoop($node);
+            $nonElement = $this->loopStack[count($this->loopStack) - 1]['nonElement'];
+
+            // Inside the loop body, the value variable holds one iterated item.
+            // If the source is plain, so is each item — propagate that so a
+            // nested loop over this variable is recognised as plain too. Save
+            // and restore any shadowed outer binding.
+            $hadPlain = isset($this->plainVars[$valueVar]);
+            if ($nonElement) {
+                $this->plainVars[$valueVar] = true;
+            } else {
+                unset($this->plainVars[$valueVar]);
+            }
+
             foreach ($node as $child) {
                 if ($child === $seq) {
                     continue;
                 }
                 $this->walk($child);
             }
+
             array_pop($this->loopStack);
+            if ($hadPlain) {
+                $this->plainVars[$valueVar] = true;
+            } else {
+                unset($this->plainVars[$valueVar]);
+            }
 
             return;
         }
@@ -133,6 +168,12 @@ final class TwigPerformanceAnalyzer
         }
 
         $frame = $this->loopStack[count($this->loopStack) - 1];
+        if ($frame['nonElement']) {
+            // Loop iterates a plain array/hash literal; its items are not
+            // elements, so `<loopVar>.<handle>` is never a relation N+1.
+            return;
+        }
+
         $chainMethodsAboveRelation = [];
         $current = $node;
 
@@ -231,7 +272,7 @@ final class TwigPerformanceAnalyzer
         if ($objectName === null || $attr === null) {
             return;
         }
-        if (! $this->isActiveLoopVar($objectName) || ! $this->relations->isRelation($attr)) {
+        if (! $this->isActiveElementLoopVar($objectName) || ! $this->relations->isRelation($attr)) {
             return;
         }
 
@@ -347,10 +388,15 @@ final class TwigPerformanceAnalyzer
         );
     }
 
-    private function isActiveLoopVar(string $name): bool
+    /**
+     * True when $name is the value variable of an active loop that iterates
+     * elements (not a plain array/hash literal), i.e. a loop whose items can
+     * carry relations.
+     */
+    private function isActiveElementLoopVar(string $name): bool
     {
         foreach ($this->loopStack as $frame) {
-            if ($frame['var'] === $name) {
+            if ($frame['var'] === $name && ! $frame['nonElement']) {
                 return true;
             }
         }
@@ -410,7 +456,29 @@ final class TwigPerformanceAnalyzer
         $name = TwigNodeHelper::nameOf($names);
         if ($name !== null) {
             $this->assignments[$name] = $values;
+
+            if ($this->isPlainExpr($values)) {
+                $this->plainVars[$name] = true;
+            } else {
+                unset($this->plainVars[$name]);
+            }
         }
+    }
+
+    /**
+     * A plain (non-element) expression: an array/hash literal, or a bare
+     * reference to a variable already known to be plain. Query builders and
+     * relation accesses are GetAttr chains, so they are never plain.
+     */
+    private function isPlainExpr(Node $node): bool
+    {
+        if ($node instanceof ArrayExpression) {
+            return true;
+        }
+
+        $name = TwigNodeHelper::nameOf($node);
+
+        return $name !== null && isset($this->plainVars[$name]);
     }
 
     private function firstChild(Node $wrapper): ?Node
@@ -422,7 +490,10 @@ final class TwigPerformanceAnalyzer
         return null;
     }
 
-    private function enterLoop(ForNode $node): void
+    /**
+     * Pushes a loop frame and returns the loop's value-variable name.
+     */
+    private function enterLoop(ForNode $node): string
     {
         $valueTarget = $node->getNode('value_target');
         $varName = $valueTarget->hasAttribute('name') ? (string) $valueTarget->getAttribute('name') : '';
@@ -433,7 +504,10 @@ final class TwigPerformanceAnalyzer
         $this->loopStack[] = [
             'var' => $varName,
             'eagerLoaded' => TwigNodeHelper::eagerLoadedRelations($resolved),
+            'nonElement' => $this->isPlainExpr($resolved),
         ];
+
+        return $varName;
     }
 
     /**

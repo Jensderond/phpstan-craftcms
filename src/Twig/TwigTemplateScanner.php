@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Jensderond\PhpstanCraftcms\Twig;
 
 use Generator;
+use RecursiveCallbackFilterIterator;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use SplFileInfo;
@@ -25,6 +26,9 @@ final class TwigTemplateScanner
     /** @var list<string> */
     private readonly array $templatePaths;
 
+    /** @var list<string> */
+    private readonly array $excludeDirectories;
+
     /**
      * The action-input and performance configs are separate parameters that
      * usually — but need not — point at the same directories. Both lists are
@@ -33,11 +37,17 @@ final class TwigTemplateScanner
      *
      * @param  list<string>  $actionInputPaths
      * @param  list<string>  $performancePaths
+     * @param  list<string>  $excludeDirectories  Directory names (not paths)
+     *                                            whose subtrees are skipped, e.g. `vendor`, `node_modules`.
+     *                                            Prunes third-party templates a package bundles under
+     *                                            `vendor/` (Craft's own CP templates, other plugins' assets)
+     *                                            when a template path points at a directory containing them.
      */
     public function __construct(
         private readonly TwigTemplateParser $parser,
         array $actionInputPaths,
         array $performancePaths,
+        array $excludeDirectories = [],
     ) {
         $merged = [];
         foreach ([...$actionInputPaths, ...$performancePaths] as $path) {
@@ -45,6 +55,7 @@ final class TwigTemplateScanner
         }
 
         $this->templatePaths = array_keys($merged);
+        $this->excludeDirectories = array_values($excludeDirectories);
     }
 
     /**
@@ -62,9 +73,22 @@ final class TwigTemplateScanner
                 continue;
             }
 
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($templatePath, RecursiveDirectoryIterator::SKIP_DOTS),
+            $directory = new RecursiveDirectoryIterator($templatePath, RecursiveDirectoryIterator::SKIP_DOTS);
+
+            // Prune excluded directories during descent so their subtrees are
+            // never entered — cheaper than filtering matched files afterwards.
+            $filtered = new RecursiveCallbackFilterIterator(
+                $directory,
+                function (SplFileInfo $current): bool {
+                    if ($current->isDir()) {
+                        return ! in_array($current->getFilename(), $this->excludeDirectories, true);
+                    }
+
+                    return true;
+                },
             );
+
+            $iterator = new RecursiveIteratorIterator($filtered);
 
             /** @var SplFileInfo $file */
             foreach ($iterator as $file) {

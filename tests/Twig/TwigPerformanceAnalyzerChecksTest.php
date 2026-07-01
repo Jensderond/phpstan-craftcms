@@ -152,4 +152,50 @@ final class TwigPerformanceAnalyzerChecksTest extends TestCase
 
         self::assertNotContains('craftcms.twigQueryInLoop', $this->ids($code));
     }
+
+    public function test_relation_named_key_on_hash_literal_loop_not_flagged(): void
+    {
+        // The loop iterates a static hash literal, so `item` is a plain hash and
+        // `item.heroImage` reads a map key, not a Craft relation — no N+1.
+        $code = <<<'TWIG'
+        {% set items = { a: { heroImage: 'a.jpg' }, b: { heroImage: 'b.jpg' } } %}
+        {% for item in items %}{{ item.heroImage }}{% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNPlusOne', $this->ids($code));
+    }
+
+    public function test_plainness_propagates_through_nested_literal_loops(): void
+    {
+        // Mirrors templates/_parts/font-preloading.twig: a hash of arrays of
+        // hashes. The inner value must still be recognised as plain.
+        $code = <<<'TWIG'
+        {% set groups = { g1: [ { heroImage: 'a.jpg' } ], g2: [ { heroImage: 'b.jpg' } ] } %}
+        {% for name, group in groups %}
+          {% for item in group %}{{ item.heroImage }}{% endfor %}
+        {% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNPlusOne', $this->ids($code));
+    }
+
+    public function test_relation_on_element_query_loop_still_flagged(): void
+    {
+        // Guard against over-suppression: a genuine element loop is unaffected.
+        $code = <<<'TWIG'
+        {% for entry in craft.entries.all() %}{{ entry.heroImage }}{% endfor %}
+        TWIG;
+
+        self::assertContains('craftcms.twigNPlusOne', $this->ids($code));
+    }
+
+    public function test_nested_relation_all_on_hash_literal_loop_not_flagged(): void
+    {
+        $code = <<<'TWIG'
+        {% set items = [ { relatedEntries: 'x' } ] %}
+        {% for item in items %}{{ item.relatedEntries.all() }}{% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNestedRelationAll', $this->ids($code));
+    }
 }

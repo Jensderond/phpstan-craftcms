@@ -1,0 +1,2 @@
+{# A third-party template that lives under vendor/ and must be excludable. #}
+{% for entry in craft.entries.all() %}{{ entry.author.name }}{% endfor %}
