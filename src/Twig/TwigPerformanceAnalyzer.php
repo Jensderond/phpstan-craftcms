@@ -220,7 +220,7 @@ final class TwigPerformanceAnalyzer
 
         // Suppress if eager-loaded (or dynamic with(...) → null → unknown).
         $eager = $frame['eagerLoaded'];
-        if ($eager === null || isset($eager[$attr])) {
+        if ($eager === null || $this->isEagerLoaded($eager, $attr)) {
             return;
         }
 
@@ -284,7 +284,7 @@ final class TwigPerformanceAnalyzer
         // not an N+1. null = unknown (e.g. the loop element came from outside
         // this template); see resolveEagerLoaded().
         $eager = $frame['eagerLoaded'];
-        if ($eager === null || isset($eager[$attr])) {
+        if ($eager === null || $this->isEagerLoaded($eager, $attr)) {
             return;
         }
 
@@ -624,13 +624,27 @@ final class TwigPerformanceAnalyzer
         // Rooted at an element of an enclosing loop: if that loop's own eager
         // state was unknown, so is this one (propagate across nested loops such
         // as `{% for child in node.children %}` under an external `nodes`).
-        // Otherwise read the visible chain, which still flags genuine
-        // un-eager-loaded nested relations within a single template.
+        // Otherwise descend the enclosing loop's eager-load paths through the
+        // relation(s) accessed here, so a deep path like
+        // `with(['children.children.children'])` keeps covering each nesting
+        // level (`node.children` → the children collection is still eager-loaded
+        // for `children.children`), while relations beyond the path's depth
+        // remain flagged. An explicit `.with()` on this source overrides the
+        // inherited state.
         foreach ($this->loopStack as $frame) {
             if ($frame['var'] === $root) {
-                return $frame['eagerLoaded'] === null
-                    ? null
-                    : TwigNodeHelper::eagerLoadedRelations($source);
+                if ($frame['eagerLoaded'] === null) {
+                    return null;
+                }
+
+                if (isset(TwigNodeHelper::methodsInChain($source)['with'])) {
+                    return TwigNodeHelper::eagerLoadedRelations($source);
+                }
+
+                return $this->descendEagerPaths(
+                    $frame['eagerLoaded'],
+                    $this->relationSegments($source),
+                );
             }
         }
 
@@ -643,5 +657,82 @@ final class TwigPerformanceAnalyzer
         // variable, embed context, or global). Its eager-load state is
         // unknowable here → unknown rather than "none".
         return null;
+    }
+
+    /**
+     * Whether relation $attr is covered by the eager-load set. Handles nested
+     * paths: `with(['children.children'])` eager-loads `children` (the head
+     * segment) as well as its `children`, so accessing `children` on the loop
+     * items is served from cache. A path matches when $attr is exactly the path
+     * or its first dotted segment.
+     *
+     * @param  array<string, true>  $eager
+     */
+    private function isEagerLoaded(array $eager, string $attr): bool
+    {
+        foreach (array_keys($eager) as $path) {
+            if ($path === $attr || str_starts_with($path, $attr.'.')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The relation segments accessed on a chain rooted at a loop variable, in
+     * root→outer order: `node.children` → ['children'], `node.parent.children`
+     * → ['parent', 'children']. Method calls (`.all()`, `.eagerly()`) are not
+     * segments and are skipped.
+     *
+     * @return list<string>
+     */
+    private function relationSegments(Node $source): array
+    {
+        $segments = [];
+        $current = $source;
+
+        while ($current instanceof GetAttrExpression) {
+            if (! TwigNodeHelper::isMethodCall($current)) {
+                $attr = TwigNodeHelper::attrName($current);
+                if ($attr !== null) {
+                    $segments[] = $attr;
+                }
+            }
+            $current = $current->hasNode('node') ? $current->getNode('node') : null;
+        }
+
+        return array_reverse($segments);
+    }
+
+    /**
+     * Descend an eager-load path set through the given relation segments,
+     * returning the eager state of the collection reached. For each segment,
+     * keep only paths whose head matches it and strip that head; a path with no
+     * remaining tail contributed no deeper eager-loading. Example: descending
+     * {'children.children.children'} through ['children'] yields
+     * {'children.children'}; descending {'children'} through ['children']
+     * yields {} (nothing deeper is eager-loaded, so the next level flags).
+     *
+     * @param  array<string, true>  $eager
+     * @param  list<string>  $segments
+     * @return array<string, true>
+     */
+    private function descendEagerPaths(array $eager, array $segments): array
+    {
+        $set = $eager;
+
+        foreach ($segments as $segment) {
+            $next = [];
+            foreach (array_keys($set) as $path) {
+                $parts = explode('.', $path);
+                if ($parts[0] === $segment && count($parts) > 1) {
+                    $next[implode('.', array_slice($parts, 1))] = true;
+                }
+            }
+            $set = $next;
+        }
+
+        return $set;
     }
 }
