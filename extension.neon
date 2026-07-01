@@ -89,9 +89,25 @@ services:
 		tags:
 			- phpstan.collector
 	-
+		class: Jensderond\PhpstanCraftcms\Collector\AnalysisMarkerCollector
+		tags:
+			- phpstan.collector
+	-
+		class: Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
+		arguments:
+			parser: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser
+			actionInputPaths: %craftActionInput.templatePaths%
+			performancePaths: %craftTwigPerformance.templatePaths%
+	-
+		class: Jensderond\PhpstanCraftcms\Twig\TwigTemplateCacheMetaExtension
+		arguments:
+			scanner: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
+		tags:
+			- phpstan.resultCacheMetaExtension
+	-
 		class: Jensderond\PhpstanCraftcms\Rule\TwigActionInputRule
 		arguments:
-			templatePaths: %craftActionInput.templatePaths%
+			scanner: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
 		tags:
 			- phpstan.rules.rule
 	-
@@ -116,9 +132,8 @@ services:
 	-
 		class: Jensderond\PhpstanCraftcms\Rule\TwigPerformanceRule
 		arguments:
-			parser: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser
+			scanner: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
 			analyzer: @Jensderond\PhpstanCraftcms\Twig\TwigPerformanceAnalyzer
-			templatePaths: %craftTwigPerformance.templatePaths%
 			enabled: %craftTwigPerformance.enabled%
 		tags:
 			- phpstan.rules.rule

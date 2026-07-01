@@ -8,6 +8,7 @@ use Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry;
 use Jensderond\PhpstanCraftcms\Rule\TwigPerformanceRule;
 use Jensderond\PhpstanCraftcms\Twig\TwigPerformanceAnalyzer;
 use Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser;
+use Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner;
 use PHPUnit\Framework\TestCase;
 
 final class TwigPerformanceRuleTest extends TestCase
@@ -23,12 +24,13 @@ final class TwigPerformanceRuleTest extends TestCase
             'unboundedAll' => false,
         ]);
 
-        return new TwigPerformanceRule(
+        $scanner = new TwigTemplateScanner(
             new TwigTemplateParser,
-            $analyzer,
             [__DIR__.'/../fixtures/templates'],
-            $enabled,
+            [],
         );
+
+        return new TwigPerformanceRule($scanner, $analyzer, $enabled);
     }
 
     public function test_reports_n_plus_one_in_template_tree(): void
