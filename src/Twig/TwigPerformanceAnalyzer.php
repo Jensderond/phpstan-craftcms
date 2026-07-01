@@ -114,8 +114,13 @@ final class TwigPerformanceAnalyzer
                 unset($this->plainVars[$valueVar]);
             }
 
+            // The {% else %} branch runs at most once (only when the sequence
+            // is empty), so it is walked OUTSIDE this loop's frame below —
+            // a query there is not a per-iteration query.
+            $else = $node->hasNode('else') ? $node->getNode('else') : null;
+
             foreach ($node as $child) {
-                if ($child === $seq) {
+                if ($child === $seq || $child === $else) {
                     continue;
                 }
                 $this->walk($child);
@@ -126,6 +131,10 @@ final class TwigPerformanceAnalyzer
                 $this->plainVars[$valueVar] = true;
             } else {
                 unset($this->plainVars[$valueVar]);
+            }
+
+            if ($else instanceof Node) {
+                $this->walk($else);
             }
 
             return;
@@ -169,13 +178,6 @@ final class TwigPerformanceAnalyzer
             return;
         }
 
-        $frame = $this->loopStack[count($this->loopStack) - 1];
-        if ($frame['nonElement']) {
-            // Loop iterates a plain array/hash literal; its items are not
-            // elements, so `<loopVar>.<handle>` is never a relation N+1.
-            return;
-        }
-
         $chainMethodsAboveRelation = [];
         $current = $node;
 
@@ -183,7 +185,12 @@ final class TwigPerformanceAnalyzer
             $object = $current->hasNode('node') ? $current->getNode('node') : null;
             $objectName = $object instanceof Node ? TwigNodeHelper::nameOf($object) : null;
 
-            if ($objectName === $frame['var']) {
+            // The chain may be rooted at ANY active loop's value variable, not
+            // just the innermost one: `entry.author` inside a nested loop still
+            // runs once per `entry` iteration. elementLoopFrame() resolves the
+            // name shadow-aware, so an inner loop over a plain literal masks an
+            // outer element loop of the same variable name.
+            if ($objectName !== null && ($frame = $this->elementLoopFrame($objectName)) !== null) {
                 // `<loopVar>.<attr>` found: $current is the relation access.
                 $this->reportIfUnguarded($current, $frame, $chainMethodsAboveRelation);
 
@@ -401,19 +408,11 @@ final class TwigPerformanceAnalyzer
     }
 
     /**
-     * True when $name is the value variable of an active loop that iterates
-     * elements (not a plain array/hash literal), i.e. a loop whose items can
-     * carry relations.
-     */
-    private function isActiveElementLoopVar(string $name): bool
-    {
-        return $this->elementLoopFrame($name) !== null;
-    }
-
-    /**
-     * The innermost active loop frame whose value variable is $name and which
-     * iterates elements (not a plain array/hash literal), or null if none. The
-     * innermost match wins so a shadowing inner loop's eager state is used.
+     * The innermost active loop frame whose value variable is $name, provided
+     * that loop iterates elements (not a plain array/hash literal); null when
+     * $name is not a loop variable. The innermost match decides so an inner
+     * loop shadowing $name masks the outer binding: if it iterates a plain
+     * literal, $name holds plain values here and no element frame is returned.
      *
      * @return array{var: string, eagerLoaded: array<string, true>|null, nonElement: bool}|null
      */
@@ -421,8 +420,8 @@ final class TwigPerformanceAnalyzer
     {
         for ($i = count($this->loopStack) - 1; $i >= 0; $i--) {
             $frame = $this->loopStack[$i];
-            if ($frame['var'] === $name && ! $frame['nonElement']) {
-                return $frame;
+            if ($frame['var'] === $name) {
+                return $frame['nonElement'] ? null : $frame;
             }
         }
 

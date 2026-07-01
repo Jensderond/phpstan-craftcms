@@ -175,6 +175,36 @@ final class TwigPerformanceAnalyzerTest extends TestCase
         self::assertContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
     }
 
+    public function test_flags_relation_on_outer_loop_variable_inside_nested_loop(): void
+    {
+        // `entry.author` runs once per `entry` iteration even though the access
+        // sits in an inner loop over a different variable — still an N+1.
+        $code = <<<'TWIG'
+        {% for entry in craft.entries.all() %}
+          {% for size in [1, 2, 3] %}
+            {{ entry.author.fullName }}
+          {% endfor %}
+        {% endfor %}
+        TWIG;
+
+        self::assertContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
+
+    public function test_inner_literal_loop_shadowing_the_variable_masks_the_outer_loop(): void
+    {
+        // The inner loop rebinds `entry` to plain hash values, so `entry.author`
+        // here reads a map key of the shadowing binding — not the outer element.
+        $code = <<<'TWIG'
+        {% for entry in craft.entries.all() %}
+          {% for entry in [{ author: 'jane' }] %}
+            {{ entry.author }}
+          {% endfor %}
+        {% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
+
     public function test_does_not_flag_first_segment_of_nested_eager_path(): void
     {
         // `with(['children.children'])` eager-loads the top-level `children`

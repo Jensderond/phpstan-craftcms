@@ -123,6 +123,21 @@ final class TwigPerformanceAnalyzerChecksTest extends TestCase
         ]));
     }
 
+    public function test_query_in_for_else_branch_not_flagged(): void
+    {
+        // The {% else %} branch runs at most once (when the sequence is empty),
+        // so a query there is not a per-iteration query.
+        $code = <<<'TWIG'
+        {% for entry in entries %}
+          {{ entry.title }}
+        {% else %}
+          {{ craft.entries.section("fallback").one().title }}
+        {% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigQueryInLoop', $this->ids($code));
+    }
+
     public function test_query_in_loop_fires_on_property_off_fetch(): void
     {
         $code = <<<'TWIG'
