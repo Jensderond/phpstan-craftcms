@@ -6,6 +6,8 @@ namespace Jensderond\PhpstanCraftcms\Twig;
 
 use Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry;
 use Twig\Node\Expression\ArrayExpression;
+use Twig\Node\Expression\Binary\NullCoalesceBinary;
+use Twig\Node\Expression\ConditionalExpression;
 use Twig\Node\Expression\FilterExpression;
 use Twig\Node\Expression\GetAttrExpression;
 use Twig\Node\ForNode;
@@ -272,7 +274,17 @@ final class TwigPerformanceAnalyzer
         if ($objectName === null || $attr === null) {
             return;
         }
-        if (! $this->isActiveElementLoopVar($objectName) || ! $this->relations->isRelation($attr)) {
+        $frame = $this->elementLoopFrame($objectName);
+        if ($frame === null || ! $this->relations->isRelation($attr)) {
+            return;
+        }
+
+        // If the relation is (or may be) eager-loaded, `<loopVar>.<rel>.all()` is
+        // served from the eager-loaded cache rather than re-querying, so it is
+        // not an N+1. null = unknown (e.g. the loop element came from outside
+        // this template); see resolveEagerLoaded().
+        $eager = $frame['eagerLoaded'];
+        if ($eager === null || isset($eager[$attr])) {
             return;
         }
 
@@ -395,13 +407,26 @@ final class TwigPerformanceAnalyzer
      */
     private function isActiveElementLoopVar(string $name): bool
     {
-        foreach ($this->loopStack as $frame) {
+        return $this->elementLoopFrame($name) !== null;
+    }
+
+    /**
+     * The innermost active loop frame whose value variable is $name and which
+     * iterates elements (not a plain array/hash literal), or null if none. The
+     * innermost match wins so a shadowing inner loop's eager state is used.
+     *
+     * @return array{var: string, eagerLoaded: array<string, true>|null, nonElement: bool}|null
+     */
+    private function elementLoopFrame(string $name): ?array
+    {
+        for ($i = count($this->loopStack) - 1; $i >= 0; $i--) {
+            $frame = $this->loopStack[$i];
             if ($frame['var'] === $name && ! $frame['nonElement']) {
-                return true;
+                return $frame;
             }
         }
 
-        return false;
+        return null;
     }
 
     /**
@@ -503,7 +528,7 @@ final class TwigPerformanceAnalyzer
 
         $this->loopStack[] = [
             'var' => $varName,
-            'eagerLoaded' => TwigNodeHelper::eagerLoadedRelations($resolved),
+            'eagerLoaded' => $this->resolveEagerLoaded($resolved),
             'nonElement' => $this->isPlainExpr($resolved),
         ];
 
@@ -512,15 +537,111 @@ final class TwigPerformanceAnalyzer
 
     /**
      * If the loop source is a bare variable assigned one level back, use that
-     * expression; otherwise use the source expression as-is.
+     * expression; otherwise use the source expression as-is. Fallback wrappers
+     * (`query ?? []`, `query ?: []`) are unwrapped to the query on both the
+     * direct source and the resolved assignment.
      */
     private function resolveSource(Node $source): Node
     {
+        $source = $this->unwrapFallback($source);
+
         $name = TwigNodeHelper::nameOf($source);
         if ($name !== null && isset($this->assignments[$name])) {
-            return $this->assignments[$name];
+            return $this->unwrapFallback($this->assignments[$name]);
         }
 
         return $source;
+    }
+
+    /**
+     * Unwrap a `query ?? default` / `query ?: default` fallback to the query
+     * side, so the eager-loading on the query is visible. Without this the query
+     * is buried in the fallback node and every relation access on the loop items
+     * is misreported — the exact false positive behind the ubiquitous
+     * `craft.…all() ?? []` navigation idiom.
+     *
+     * The AST shape differs across Twig versions:
+     *  - Twig ≥3.16 parses `a ?? b` to a NullCoalesceBinary (`left` = the query);
+     *  - `a ?: b` (and `a ?? b` on older Twig) is a ConditionalExpression whose
+     *    `expr2` holds the value used when the subject is present — the query.
+     */
+    private function unwrapFallback(Node $source): Node
+    {
+        if ($source instanceof NullCoalesceBinary && $source->hasNode('left')) {
+            return $source->getNode('left');
+        }
+
+        if ($source instanceof ConditionalExpression && $source->hasNode('expr2')) {
+            return $source->getNode('expr2');
+        }
+
+        return $source;
+    }
+
+    /**
+     * The eager-load set for a loop source, or null ("unknown") when the source
+     * cannot be traced to something visible in THIS template.
+     *
+     * PHPStan analyses each template in isolation, so a partial that receives an
+     * already-eager-loaded element across an {% include %}/{% embed %} boundary
+     * (e.g. navigation/node.twig iterating `node.children`, where `nodes` was
+     * fetched with `.with(['children.children'])` in the parent layout) has no
+     * way to see that eager-loading. Assuming "nothing eager-loaded" for such an
+     * externally-supplied variable is exactly what produced N+1 false positives.
+     *
+     * We only trust an *empty* eager-load set when we can actually read the
+     * query's chain: a `craft.*` global (covers `craft.entries()…` and plugin
+     * queries such as `craft.navigation.nodes()…`), a builder recognised by
+     * isQueryRooted (`.find()`/`.relatedTo()`), a `{% set %}` variable, or an
+     * element of an enclosing loop whose own source was known. Otherwise the
+     * state is unknown → null, which the N+1 checks treat as
+     * possibly-eager-loaded and suppress (the same sentinel a dynamic
+     * `with(...)` yields).
+     *
+     * @return array<string, true>|null
+     */
+    private function resolveEagerLoaded(Node $source): ?array
+    {
+        // A plain array/hash literal (or a var known to hold one): no relations.
+        if ($this->isPlainExpr($source)) {
+            return [];
+        }
+
+        $root = TwigNodeHelper::rootName($source);
+
+        // A chain whose query we can read directly — rooted at the `craft`
+        // global, or a recognised builder. A missing `.with()` here genuinely
+        // means no eager-loading.
+        if ($root === 'craft' || TwigNodeHelper::isQueryRooted($source)) {
+            return TwigNodeHelper::eagerLoadedRelations($source);
+        }
+
+        if ($root === null) {
+            // No identifiable root variable (unusual) → keep the conservative reading.
+            return TwigNodeHelper::eagerLoadedRelations($source);
+        }
+
+        // Rooted at an element of an enclosing loop: if that loop's own eager
+        // state was unknown, so is this one (propagate across nested loops such
+        // as `{% for child in node.children %}` under an external `nodes`).
+        // Otherwise read the visible chain, which still flags genuine
+        // un-eager-loaded nested relations within a single template.
+        foreach ($this->loopStack as $frame) {
+            if ($frame['var'] === $root) {
+                return $frame['eagerLoaded'] === null
+                    ? null
+                    : TwigNodeHelper::eagerLoadedRelations($source);
+            }
+        }
+
+        // Rooted at a variable assigned locally via {% set %}: visible here.
+        if (isset($this->assignments[$root])) {
+            return TwigNodeHelper::eagerLoadedRelations($source);
+        }
+
+        // Rooted at a variable supplied from outside this template (include
+        // variable, embed context, or global). Its eager-load state is
+        // unknowable here → unknown rather than "none".
+        return null;
     }
 }

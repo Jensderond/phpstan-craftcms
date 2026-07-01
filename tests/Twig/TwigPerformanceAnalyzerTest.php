@@ -100,4 +100,78 @@ final class TwigPerformanceAnalyzerTest extends TestCase
 
         self::assertContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
     }
+
+    public function test_does_not_flag_relation_off_external_variable_chain(): void
+    {
+        // A partial (e.g. navigation/node.twig) receives an element that was
+        // eager-loaded in a parent template and passed across an {% include %}.
+        // `node` is undefined in this template, so its eager-load state is
+        // unknowable here and must not be assumed absent.
+        $code = <<<'TWIG'
+        {% for child in node.children %}
+          {{ child.children | length }}
+        {% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
+
+    public function test_does_not_flag_relation_off_external_bare_variable(): void
+    {
+        // `entries` is supplied from outside this template (include var/global);
+        // we cannot see whether the upstream query eager-loaded `author`.
+        $code = <<<'TWIG'
+        {% for entry in entries %}
+          {{ entry.author.fullName }}
+        {% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
+
+    public function test_does_not_flag_eager_loaded_relation_when_source_has_fallback(): void
+    {
+        // The `... .all() ?? []` idiom must not hide the query: `children` IS
+        // eager-loaded here (footer/careers navigation pattern), so accessing it
+        // on the loop items is not an N+1.
+        $code = <<<'TWIG'
+        {% set nodes = craft.navigation.nodes().handle('main').with(['children']).all() ?? [] %}
+        {% for node in nodes %}
+          {{ node.children | length }}
+        {% endfor %}
+        TWIG;
+
+        self::assertNotContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
+
+    public function test_still_flags_deeper_relation_not_eager_loaded_behind_fallback(): void
+    {
+        // Only `children` (level 2) is eager-loaded; `child.children` (level 3)
+        // is a genuine N+1 and must still fire even through the `?? []` fallback.
+        $code = <<<'TWIG'
+        {% set nodes = craft.navigation.nodes().handle('main').with(['children']).all() ?? [] %}
+        {% for node in nodes %}
+          {% for child in node.children %}
+            {{ child.children | length }}
+          {% endfor %}
+        {% endfor %}
+        TWIG;
+
+        self::assertContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
+
+    public function test_still_flags_nested_relation_when_source_is_visible_query(): void
+    {
+        // The outer collection comes from a query we can see, so a nested
+        // relation that is not eager-loaded is a genuine N+1 and must still fire.
+        $code = <<<'TWIG'
+        {% for entry in craft.entries.all() %}
+          {% for related in entry.relatedEntries %}
+            {{ related.author.fullName }}
+          {% endfor %}
+        {% endfor %}
+        TWIG;
+
+        self::assertContains('craftcms.twigNPlusOne', $this->identifiers($this->analyze($code)));
+    }
 }
