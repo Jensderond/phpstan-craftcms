@@ -78,6 +78,25 @@ arrays; dynamic arguments suppress the finding. `|length`-on-query detection is 
 best-effort static heuristic. Eager-load suppression recognizes both
 `.with([...])` and Craft 5's `.eagerly()`.
 
+#### Result cache and template changes
+
+The Twig checks scan the template tree directly, outside PHPStan's per-file
+analysis. PHPStan's result cache is keyed on the analysed **PHP** files (and the
+config), so it is **not** aware of your `.twig` files. When you change only a
+template, a warm result cache can serve stale Twig findings — or none at all —
+because PHPStan may short-circuit before the checks re-run.
+
+To get reliable Twig results:
+
+- **In CI**, run against a cold cache (CI containers start without one), or add
+  `phpstan clear-result-cache` before `phpstan analyse`.
+- **Locally**, run `vendor/bin/phpstan clear-result-cache` after editing
+  templates (or pass a fresh `--memory-limit`/config that invalidates the cache)
+  before trusting the Twig findings.
+
+This does not affect the PHP-level features above, which participate in the
+result cache normally.
+
 ## Credits
 
 - [studio-stomp/phpstan-craftcms](https://github.com/studio-stomp/phpstan-craftcms)

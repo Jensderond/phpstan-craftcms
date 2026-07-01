@@ -218,10 +218,10 @@ final class TwigNodeHelper
 
     /**
      * The filter name of a FilterExpression (e.g. `length` in `foo|length`).
-     * Verified against installed Twig 3.15: the `name` attribute is always set
-     * by the FilterExpression constructor regardless of how it was built, and
-     * the `filter` child node (when present) is a ConstantExpression carrying
-     * the same value.
+     * Verified against Twig 3.27 (the required floor): the `name` attribute is
+     * always set by the FilterExpression constructor regardless of how it was
+     * built, and the `filter` child node (when present) is a ConstantExpression
+     * carrying the same value.
      */
     public static function filterName(FilterExpression $node): ?string
     {
