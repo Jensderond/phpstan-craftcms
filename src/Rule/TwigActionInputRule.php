@@ -7,29 +7,28 @@ namespace Jensderond\PhpstanCraftcms\Rule;
 use Jensderond\PhpstanCraftcms\Collector\ControllerActionCollector;
 use Jensderond\PhpstanCraftcms\Helper\ActionRouteMap;
 use Jensderond\PhpstanCraftcms\Helper\ActionRouteResolver;
+use Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner;
 use PhpParser\Node;
 use PHPStan\Analyser\Scope;
 use PHPStan\Node\CollectedDataNode;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleError;
 use PHPStan\Rules\RuleErrorBuilder;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
-use SplFileInfo;
 
 /**
  * Validates that actionInput() calls in Twig templates reference valid controller action routes.
+ *
+ * Template traversal is delegated to {@see TwigTemplateScanner} (shared with
+ * the performance scanning); this rule only needs each template's raw contents
+ * for its regex match.
  *
  * @implements Rule<CollectedDataNode>
  */
 final class TwigActionInputRule implements Rule
 {
-    /**
-     * @param  list<string>  $templatePaths
-     */
     public function __construct(
         private readonly ActionRouteMap $actionRouteMap,
-        private readonly array $templatePaths,
+        private readonly TwigTemplateScanner $scanner,
     ) {}
 
     public function getNodeType(): string
@@ -75,12 +74,14 @@ final class TwigActionInputRule implements Rule
         /** @var list<RuleError> $errors */
         $errors = [];
 
-        foreach ($this->templatePaths as $templatePath) {
-            if (! is_dir($templatePath)) {
+        foreach ($this->scanner->scan() as $template) {
+            $contents = $template->contents();
+
+            if ($contents === null) {
                 continue;
             }
 
-            $this->scanDirectory($templatePath, $validRoutes, $errors);
+            $this->scanTwigFile($template->path(), $contents, $validRoutes, $errors);
         }
 
         return $errors;
@@ -90,40 +91,8 @@ final class TwigActionInputRule implements Rule
      * @param  array<string, true>  $validRoutes
      * @param  list<RuleError>  $errors
      */
-    private function scanDirectory(string $directory, array $validRoutes, array &$errors): void
+    private function scanTwigFile(string $filePath, string $contents, array $validRoutes, array &$errors): void
     {
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($directory),
-        );
-
-        /** @var SplFileInfo $file */
-        foreach ($iterator as $file) {
-            if ($file->getExtension() !== 'twig') {
-                continue;
-            }
-
-            $realPath = $file->getRealPath();
-
-            if ($realPath === false) {
-                continue;
-            }
-
-            $this->scanTwigFile($realPath, $validRoutes, $errors);
-        }
-    }
-
-    /**
-     * @param  array<string, true>  $validRoutes
-     * @param  list<RuleError>  $errors
-     */
-    private function scanTwigFile(string $filePath, array $validRoutes, array &$errors): void
-    {
-        $contents = file_get_contents($filePath);
-
-        if ($contents === false) {
-            return;
-        }
-
         // Match actionInput('route/string') or actionInput("route/string")
         if (! preg_match_all('/actionInput\(\s*[\'"]([^\'"]+)[\'"]/m', $contents, $matches, PREG_OFFSET_CAPTURE)) {
             return;

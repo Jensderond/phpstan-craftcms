@@ -7,8 +7,25 @@ parameters:
 			- %currentWorkingDirectory%/modules
 			- %currentWorkingDirectory%/plugins
 		handleMap: []
+	craftTemplateScan:
+		# Directory names (not paths) pruned from the template walk. Keeps
+		# third-party templates bundled under vendor/ (Craft's own CP templates,
+		# other plugins' example/asset templates) out of scanning when a
+		# template path points at a directory that contains them.
+		excludeDirectories:
+			- vendor
+			- node_modules
 	craftcms:
 		projectConfigPath: %currentWorkingDirectory%/config/project
+	craftTwigPerformance:
+		enabled: true
+		templatePaths: %craftActionInput.templatePaths%
+		checks:
+			nPlusOne: true
+			nestedRelationAll: true
+			queryInLoop: true
+			lengthOnQuery: true
+			unboundedAll: false
 	reportUnmatchedIgnoredErrors: false
 	excludePaths:
 		- ../../craftcms/cms/src/test/internal/*
@@ -45,8 +62,22 @@ parametersSchema:
 		templatePaths: listOf(string())
 		handleMap: schema(arrayOf(string()))
 	])
+	craftTemplateScan: structure([
+		excludeDirectories: listOf(string())
+	])
 	craftcms: structure([
 		projectConfigPath: schema(string())
+	])
+	craftTwigPerformance: structure([
+		enabled: schema(bool())
+		templatePaths: listOf(string())
+		checks: structure([
+			nPlusOne: schema(bool())
+			nestedRelationAll: schema(bool())
+			queryInLoop: schema(bool())
+			lengthOnQuery: schema(bool())
+			unboundedAll: schema(bool())
+		])
 	])
 
 services:
@@ -69,9 +100,26 @@ services:
 		tags:
 			- phpstan.collector
 	-
+		class: Jensderond\PhpstanCraftcms\Collector\AnalysisMarkerCollector
+		tags:
+			- phpstan.collector
+	-
+		class: Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
+		arguments:
+			parser: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser
+			actionInputPaths: %craftActionInput.templatePaths%
+			performancePaths: %craftTwigPerformance.templatePaths%
+			excludeDirectories: %craftTemplateScan.excludeDirectories%
+	-
+		class: Jensderond\PhpstanCraftcms\Twig\TwigTemplateCacheMetaExtension
+		arguments:
+			scanner: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
+		tags:
+			- phpstan.resultCacheMetaExtension
+	-
 		class: Jensderond\PhpstanCraftcms\Rule\TwigActionInputRule
 		arguments:
-			templatePaths: %craftActionInput.templatePaths%
+			scanner: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
 		tags:
 			- phpstan.rules.rule
 	-
@@ -86,3 +134,18 @@ services:
 		class: Jensderond\PhpstanCraftcms\Reflection\CustomFieldQueryMethodsExtension
 		tags:
 			- phpstan.broker.methodsClassReflectionExtension
+	- Jensderond\PhpstanCraftcms\Twig\TwigTemplateParser
+	- Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry(%craftcms.projectConfigPath%)
+	-
+		class: Jensderond\PhpstanCraftcms\Twig\TwigPerformanceAnalyzer
+		arguments:
+			relations: @Jensderond\PhpstanCraftcms\Helper\RelationFieldRegistry
+			enabledChecks: %craftTwigPerformance.checks%
+	-
+		class: Jensderond\PhpstanCraftcms\Rule\TwigPerformanceRule
+		arguments:
+			scanner: @Jensderond\PhpstanCraftcms\Twig\TwigTemplateScanner
+			analyzer: @Jensderond\PhpstanCraftcms\Twig\TwigPerformanceAnalyzer
+			enabled: %craftTwigPerformance.enabled%
+		tags:
+			- phpstan.rules.rule
